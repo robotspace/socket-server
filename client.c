@@ -5,15 +5,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
-
-
-static void
-test(struct socket_server *ss) {
-
-	int l = socket_server_listen(ss,200,"127.0.0.1",8888,32);
-	printf("listening %d\n",l);
-	socket_server_start(ss,201,l);
-
+#include <string.h>
+static void *
+_poll(void * ud) {
+	struct socket_server *ss = ud;
 	struct socket_message result;
 	for (;;) {
 		int type = socket_server_poll(ss, &result, NULL);
@@ -23,9 +18,8 @@ test(struct socket_server *ss) {
 			return NULL;
 		case SOCKET_DATA:
 			printf("message(%lu) [id=%d] size=%d\n",result.opaque,result.id, result.ud);
-			socket_server_send(ss, result.id, result.data, result.ud);
-			printf("received msg:%s\n",result.data);
-			//	free(result.data);
+			printf("receive echo message:%s\n",result.data);
+			free(result.data);
 			break;
 		case SOCKET_CLOSE:
 			printf("close(%lu) [id=%d]\n",result.opaque,result.id);
@@ -38,10 +32,34 @@ test(struct socket_server *ss) {
 			break;
 		case SOCKET_ACCEPT:
 			printf("accept(%lu) [id=%d %s] from [%d]\n",result.opaque, result.ud, result.data, result.id);
-			socket_server_start(ss, 300, result.ud);			
 			break;
 		}
 	}
+}
+
+static void
+test(struct socket_server *ss) {
+	pthread_t pid;
+	pthread_create(&pid, NULL, _poll, ss);
+
+	int c = socket_server_connect(ss,100,"127.0.0.1",8888);
+	printf("connecting %d\n",c);
+	//	sleep(1);
+	char buf[1024]="hello world";
+	
+	while(fgets(buf, sizeof(buf), stdin) != NULL){
+		if (strncmp(buf, "quit", 4) == 0){
+			break;
+		}
+		buf[strlen(buf) - 1] = '\n';
+		char *sendbuf = (char*)malloc(sizeof(buf)+1);
+		memcpy(sendbuf, buf, strlen(buf)+1);
+		//将输入发送到指定ID的服务端
+		socket_server_send(ss, c, sendbuf, strlen(sendbuf));
+	}
+	
+	socket_server_exit(ss);
+	pthread_join(pid, NULL); 
 }
 
 int
